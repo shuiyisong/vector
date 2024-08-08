@@ -97,6 +97,46 @@ pub(super) struct GreptimeDBLogsHttpRequestBuilder {
     pub(super) extra_params: Option<HashMap<String, String>>,
 }
 
+/*
+{
+    "bytes": 2087,
+    "http_version": "HTTP/1.1",
+    "ip": "225.144.116.48",
+    "method": "PUT",
+    "path": "/user/booperbot124",
+    "status": 404,
+    "timestamp": "2024-08-08T03:32:20Z",
+    "user": "ahmadajmi"
+}
+*/
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct LogItem {
+    bytes: u64,
+    http_version: String,
+    ip: String,
+    method: String,
+    path: String,
+    status: u16,
+    timestamp: String,
+    user: String,
+}
+
+impl LogItem {
+    fn to_value(&self) -> String {
+        format!(
+            "({}, {}, {}, {}, {}, {}, {}, {})",
+            self.bytes,
+            self.http_version,
+            self.ip,
+            self.method,
+            self.path,
+            self.status,
+            self.timestamp,
+            self.user
+        )
+    }
+}
+
 impl HttpServiceRequestBuilder<PartitionKey> for GreptimeDBLogsHttpRequestBuilder {
     fn build(&self, mut request: HttpRequest<PartitionKey>) -> Result<Request<Bytes>, Error> {
         let metadata = request.get_additional_metadata();
@@ -124,8 +164,16 @@ impl HttpServiceRequestBuilder<PartitionKey> for GreptimeDBLogsHttpRequestBuilde
 
         let url = url_builder.finish().to_string();
 
+        warn!(message = "[DEBUG]", url = url);
+
         // prepare body
         let payload = request.take_payload();
+        let p = String::from_utf8_lossy(&payload).to_owned().to_string();
+
+        p.split("\n").enumerate().for_each(|(i, line)| {
+            let item: LogItem = serde_json::from_str(line).unwrap();
+            warn!(message = "[DEBUG]", value = item.to_value(), index = i);
+        });
 
         let mut builder = Request::post(&url)
             .header(CONTENT_TYPE, "application/json")
