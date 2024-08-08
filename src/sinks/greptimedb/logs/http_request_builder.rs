@@ -12,7 +12,7 @@ use crate::sinks::{HTTPRequestBuilderSnafu, HealthcheckError};
 use crate::Error;
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
-use http::header::{CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_TYPE};
+use http::header::{CONTENT_ENCODING, CONTENT_TYPE};
 use http::{Request, StatusCode};
 use hyper::Body;
 use snafu::ResultExt;
