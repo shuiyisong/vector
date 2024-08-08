@@ -125,7 +125,7 @@ struct LogItem {
 impl LogItem {
     fn to_value(&self) -> String {
         format!(
-            "({}, {}, {}, {}, {}, {}, {}, {})",
+            "({}, '{}', '{}', '{}', '{}', {}, {}, '{}')",
             self.bytes,
             self.http_version,
             self.ip,
@@ -145,17 +145,10 @@ impl HttpServiceRequestBuilder<PartitionKey> for GreptimeDBLogsHttpRequestBuilde
         let db = metadata.dbname.clone();
 
         // prepare url
-        let endpoint = format!("{}/v1/events/logs", self.endpoint.as_str());
+        let endpoint = format!("{}/v1/sql", self.endpoint.as_str());
         let mut url = url::Url::parse(&endpoint).unwrap();
         let mut url_builder = url.query_pairs_mut();
-        url_builder
-            .append_pair("db", &db)
-            .append_pair("table", &table)
-            .append_pair("pipeline_name", &metadata.pipeline_name);
-
-        if let Some(pipeline_version) = metadata.pipeline_version.as_ref() {
-            url_builder.append_pair("pipeline_version", pipeline_version);
-        }
+        url_builder.append_pair("db", &db);
 
         if let Some(extra_params) = self.extra_params.as_ref() {
             for (key, value) in extra_params.iter() {
@@ -163,24 +156,45 @@ impl HttpServiceRequestBuilder<PartitionKey> for GreptimeDBLogsHttpRequestBuilde
             }
         }
 
-        let url = url_builder.finish().to_string();
-
-        warn!(message = "[DEBUG]", url = url);
-
         // prepare body
         let payload = request.take_payload();
         let p = String::from_utf8_lossy(&payload).to_owned().to_string();
 
-        p.split("\n").enumerate().for_each(|(i, line)| {
-            warn!(message = "[DEBUG]", line = line, index = i);
-            let item: LogItem = serde_json::from_str(line).unwrap();
-            warn!(message = "[DEBUG]", value = item.to_value());
-            warn!(message = "[DEBUG]", ts = item.timestamp.timestamp_millis());
-        });
+        // CREATE TABLE IF NOT EXISTS `ngx_access_log` (
+        //     `bytes` Int64 NULL,
+        //     `http_version` STRING NULL,
+        //     `ip` STRING NULL,
+        //     `method` STRING NULL,
+        //     `path` STRING NULL,
+        //     `status` SMALLINT UNSIGNED NULL,
+        //     `user` STRING NULL,
+        //     `timestamp` TIMESTAMP(3) NOT NULL,
+        //     TIME INDEX (`timestamp`)
+        //   )
+        //   ENGINE=mito
+        //   WITH(
+        //     append_mode = 'true'
+        //   );
 
-        let mut builder = Request::post(&url)
-            .header(CONTENT_TYPE, "application/json")
-            .header(CONTENT_LENGTH, payload.len());
+        let mut sql = String::new();
+        sql.push_str("insert into ");
+        sql.push_str(&table);
+        sql.push_str("(bytes, http_version, ip, method, path, status, timestamp, user) values ");
+        p.split("\n").for_each(|line| {
+            let item: LogItem = serde_json::from_str(line).unwrap();
+            let value = item.to_value();
+            sql.push_str(&value);
+            sql.push_str(",");
+        });
+        sql.pop();
+        sql.push_str(";");
+
+        url_builder.append_pair("sql", &sql);
+
+        let url = url_builder.finish().to_string();
+
+        let mut builder =
+            Request::post(&url).header(CONTENT_TYPE, "application/x-www-form-urlencoded");
 
         if let Some(ce) = self.compression.content_encoding() {
             builder = builder.header(CONTENT_ENCODING, ce);
