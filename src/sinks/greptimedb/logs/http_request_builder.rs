@@ -11,6 +11,7 @@ use crate::sinks::prelude::{
 use crate::sinks::{HTTPRequestBuilderSnafu, HealthcheckError};
 use crate::Error;
 use bytes::Bytes;
+use chrono::{DateTime, Utc};
 use http::header::{CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_TYPE};
 use http::{Request, StatusCode};
 use hyper::Body;
@@ -117,7 +118,7 @@ struct LogItem {
     method: String,
     path: String,
     status: u16,
-    timestamp: String,
+    timestamp: DateTime<Utc>,
     user: String,
 }
 
@@ -131,7 +132,7 @@ impl LogItem {
             self.method,
             self.path,
             self.status,
-            self.timestamp,
+            self.timestamp.timestamp_millis(),
             self.user
         )
     }
@@ -171,8 +172,10 @@ impl HttpServiceRequestBuilder<PartitionKey> for GreptimeDBLogsHttpRequestBuilde
         let p = String::from_utf8_lossy(&payload).to_owned().to_string();
 
         p.split("\n").enumerate().for_each(|(i, line)| {
+            warn!(message = "[DEBUG]", line = line, index = i);
             let item: LogItem = serde_json::from_str(line).unwrap();
-            warn!(message = "[DEBUG]", value = item.to_value(), index = i);
+            warn!(message = "[DEBUG]", value = item.to_value());
+            warn!(message = "[DEBUG]", ts = item.timestamp.timestamp_millis());
         });
 
         let mut builder = Request::post(&url)
