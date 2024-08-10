@@ -17,6 +17,7 @@ use http::{Request, StatusCode};
 use hyper::Body;
 use snafu::ResultExt;
 
+use url::form_urlencoded;
 use vector_lib::codecs::encoding::Framer;
 
 use crate::sinks::util::http::{HttpRequest, HttpResponse, HttpServiceRequestBuilder};
@@ -156,9 +157,11 @@ impl HttpServiceRequestBuilder<PartitionKey> for GreptimeDBLogsHttpRequestBuilde
             }
         }
 
+        let url = url_builder.finish().to_string();
+
         // prepare body
         let payload = request.take_payload();
-        let p = String::from_utf8_lossy(&payload).to_owned().to_string();
+        let payload_str = String::from_utf8_lossy(&payload).to_owned().to_string();
 
         // CREATE TABLE IF NOT EXISTS `ngx_access_log` (
         //     `bytes` Int64 NULL,
@@ -180,7 +183,7 @@ impl HttpServiceRequestBuilder<PartitionKey> for GreptimeDBLogsHttpRequestBuilde
         sql.push_str("insert into ");
         sql.push_str(&table);
         sql.push_str("(bytes, http_version, ip, method, path, status, timestamp, user) values ");
-        p.split("\n").for_each(|line| {
+        payload_str.split("\n").for_each(|line| {
             let item: LogItem = serde_json::from_str(line).unwrap();
             let value = item.to_value();
             sql.push_str(&value);
@@ -189,9 +192,10 @@ impl HttpServiceRequestBuilder<PartitionKey> for GreptimeDBLogsHttpRequestBuilde
         sql.pop();
         sql.push_str(";");
 
-        url_builder.append_pair("sql", &sql);
-
-        let url = url_builder.finish().to_string();
+        let form_data = form_urlencoded::Serializer::new(String::new())
+            .append_pair("sql", &sql)
+            .finish();
+        let req_payload = Bytes::from(form_data);
 
         let mut builder =
             Request::post(&url).header(CONTENT_TYPE, "application/x-www-form-urlencoded");
@@ -205,7 +209,7 @@ impl HttpServiceRequestBuilder<PartitionKey> for GreptimeDBLogsHttpRequestBuilde
         }
 
         builder
-            .body(payload)
+            .body(req_payload)
             .context(HTTPRequestBuilderSnafu)
             .map_err(Into::into)
     }
