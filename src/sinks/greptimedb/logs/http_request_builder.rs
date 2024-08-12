@@ -113,28 +113,16 @@ pub(super) struct GreptimeDBLogsHttpRequestBuilder {
 */
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct LogItem {
-    bytes: u64,
-    http_version: String,
-    ip: String,
-    method: String,
-    path: String,
-    status: u16,
+    message: String,
     timestamp: DateTime<Utc>,
-    user: String,
 }
 
 impl LogItem {
     fn to_value(&self) -> String {
         format!(
-            "({}, '{}', '{}', '{}', '{}', {}, {}, '{}')",
-            self.bytes,
-            self.http_version,
-            self.ip,
-            self.method,
-            self.path,
-            self.status,
+            "('{}', {})",
+            self.message,
             self.timestamp.timestamp_millis(),
-            self.user
         )
     }
 }
@@ -163,26 +151,20 @@ impl HttpServiceRequestBuilder<PartitionKey> for GreptimeDBLogsHttpRequestBuilde
         let payload = request.take_payload();
         let payload_str = String::from_utf8_lossy(&payload).to_owned().to_string();
 
-        // CREATE TABLE IF NOT EXISTS `ngx_access_log` (
-        //     `bytes` Int64 NULL,
-        //     `http_version` STRING NULL,
-        //     `ip` STRING NULL,
-        //     `method` STRING NULL,
-        //     `path` STRING NULL,
-        //     `status` SMALLINT UNSIGNED NULL,
-        //     `user` STRING NULL,
+        // CREATE TABLE IF NOT EXISTS `test_table` (
+        //     `message` STRING NULL FULLTEXT WITH(analyzer = 'English', case_sensitive = 'false'),
         //     `timestamp` TIMESTAMP(3) NOT NULL,
         //     TIME INDEX (`timestamp`)
         //   )
         //   ENGINE=mito
         //   WITH(
         //     append_mode = 'true'
-        //   );
+        //   )
 
         let mut sql = String::new();
         sql.push_str("insert into ");
         sql.push_str(&table);
-        sql.push_str("(bytes, http_version, ip, method, path, status, timestamp, user) values ");
+        sql.push_str("(message, timestamp) values ");
         payload_str.split("\n").for_each(|line| {
             let item: LogItem = serde_json::from_str(line).unwrap();
             let value = item.to_value();
