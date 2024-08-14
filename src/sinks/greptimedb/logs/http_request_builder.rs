@@ -11,10 +11,11 @@ use crate::sinks::prelude::{
 use crate::sinks::{HTTPRequestBuilderSnafu, HealthcheckError};
 use crate::Error;
 use bytes::Bytes;
-use chrono::{DateTime, Utc};
+// use chrono::{DateTime, Utc};
 use http::header::{CONTENT_ENCODING, CONTENT_TYPE};
 use http::{Request, StatusCode};
 use hyper::Body;
+use serde_aux::prelude::*;
 use snafu::ResultExt;
 
 use url::form_urlencoded;
@@ -101,40 +102,92 @@ pub(super) struct GreptimeDBLogsHttpRequestBuilder {
 
 /*
 {
-    "bytes": 2087,
-    "http_version": "HTTP/1.1",
-    "ip": "225.144.116.48",
-    "method": "PUT",
-    "path": "/user/booperbot124",
-    "status": 404,
-    "timestamp": "2024-08-08T03:32:20Z",
-    "user": "ahmadajmi"
+  "app_name": "crs-mr-api",
+  "biz_id": "41",
+  "context": "5dw0iPzMvajCg8rZ23iG691QGDTIQlBcz8YIY31mo9vnC6mrpajoH2PbuBMOTkVzlgWXlT2WGX0k8osAymmezzLGivLe0iOUZdOCbBVY7jbbZ05JEVjE2iYP5Y6zL9ja",
+  "env": "cnhbnp01-ontest-default",
+  "event": "CRS-CIS",
+  "event_tag": "8",
+  "file": "/Users/lucian.wkaltz/Desktop/lx_logs/tsdg.csv",
+  "host": "LucianWs-MacBook-Pro.local",
+  "indexes": "blabla",
+  "ip": "10.66.0.138",
+  "level": "Error",
+  "method": "11",
+  "msg": "-",
+  "result": "exception",
+  "rt": "19",
+  "service": "6",
+  "source_type": "file",
+  "thread": "62",
+  "timestamp": "2024-08-14T03:44:10.212007Z",
+  "trace_id": "jkliD0zz00yAruTYF5mrBIxzJVTheNaj",
+  "ts": "1723478400000"
 }
+ */
+/*
+    ts timestamp time index,
+    app_name string,
+    env string,
+    ip string,
+    `level` string,
+    thread string,
+    trace_id string,
+    biz_id string,
+    `indexes` string, -- former JSONB type
+    `event` string,
+    event_tag string,
+    msg string,
+    `result` string,
+    `service` string,
+    `method` string,
+    rt smallint,
+    context string,
 */
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct LogItem {
-    bytes: u64,
-    http_version: String,
+    #[serde(deserialize_with = "deserialize_number_from_string")]
+    ts: u64,
+    app_name: String,
+    env: String,
     ip: String,
+    level: String,
+    thread: String,
+    trace_id: String,
+    biz_id: String,
+    indexes: String,
+    event: String,
+    event_tag: String,
+    msg: String,
+    result: String,
+    service: String,
     method: String,
-    path: String,
-    status: u16,
-    timestamp: DateTime<Utc>,
-    user: String,
+    #[serde(deserialize_with = "deserialize_number_from_string")]
+    rt: i32,
+    context: String,
 }
 
 impl LogItem {
     fn to_value(&self) -> String {
         format!(
-            "({}, '{}', '{}', '{}', '{}', {}, {}, '{}')",
-            self.bytes,
-            self.http_version,
+            "({},'{}','{}','{}','{}','{}','{}','{}','{}','{}','{}','{}','{}','{}','{}',{},'{}')",
+            self.ts,
+            self.app_name,
+            self.env,
             self.ip,
+            self.level,
+            self.thread,
+            self.trace_id,
+            self.biz_id,
+            self.indexes,
+            self.event,
+            self.event_tag,
+            self.msg,
+            self.result,
+            self.service,
             self.method,
-            self.path,
-            self.status,
-            self.timestamp.timestamp_millis(),
-            self.user
+            self.rt,
+            self.context,
         )
     }
 }
@@ -163,26 +216,10 @@ impl HttpServiceRequestBuilder<PartitionKey> for GreptimeDBLogsHttpRequestBuilde
         let payload = request.take_payload();
         let payload_str = String::from_utf8_lossy(&payload).to_owned().to_string();
 
-        // CREATE TABLE IF NOT EXISTS `ngx_access_log` (
-        //     `bytes` Int64 NULL,
-        //     `http_version` STRING NULL,
-        //     `ip` STRING NULL,
-        //     `method` STRING NULL,
-        //     `path` STRING NULL,
-        //     `status` SMALLINT UNSIGNED NULL,
-        //     `user` STRING NULL,
-        //     `timestamp` TIMESTAMP(3) NOT NULL,
-        //     TIME INDEX (`timestamp`)
-        //   )
-        //   ENGINE=mito
-        //   WITH(
-        //     append_mode = 'true'
-        //   );
-
         let mut sql = String::new();
         sql.push_str("insert into ");
         sql.push_str(&table);
-        sql.push_str("(bytes, http_version, ip, method, path, status, timestamp, user) values ");
+        sql.push_str("(ts,app_name,env,ip,level,thread,trace_id,biz_id,indexes,event,event_tag,msg,result,service,method,rt,context) values ");
         payload_str.split("\n").for_each(|line| {
             let item: LogItem = serde_json::from_str(line).unwrap();
             let value = item.to_value();
@@ -195,6 +232,9 @@ impl HttpServiceRequestBuilder<PartitionKey> for GreptimeDBLogsHttpRequestBuilde
         let form_data = form_urlencoded::Serializer::new(String::new())
             .append_pair("sql", &sql)
             .finish();
+
+        // warn!("[DEBUG]sql: {}", sql);
+
         let req_payload = Bytes::from(form_data);
 
         let mut builder =
